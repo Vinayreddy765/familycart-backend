@@ -1,0 +1,295 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: FamilyCart - AI-powered family shopping memory
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: nodejs22.x
+    Architectures:
+      - x86_64
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+
+  # ── API Gateway ──────────────────────────────────────────────────────────────
+
+  FamilyCartApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - PATCH
+          - DELETE
+          - OPTIONS
+
+  # ── Lambda ───────────────────────────────────────────────────────────────────
+
+  FamilyCartFunction:
+    Type: AWS::Serverless::Function
+
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - app.ts
+        Target: es2022
+        Sourcemap: false
+        Minify: false
+        Format: cjs
+
+    Properties:
+      CodeUri: hello-world/
+      Handler: app.handler
+
+      Environment:
+        Variables:
+          ITEMS_TABLE: !Ref FamilyCartItemsTable
+          PLANS_TABLE: !Ref FamilyCartPlansTable
+          HISTORY_TABLE: !Ref FamilyCartHistoryTable
+          ACTIVITY_TABLE: !Ref FamilyCartActivityTable
+          BEDROCK_MODEL_ID: us.amazon.nova-2-lite-v1:0
+
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FamilyCartItemsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FamilyCartPlansTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FamilyCartHistoryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref FamilyCartActivityTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource: '*'
+
+      Events:
+
+        # Shopping Plans
+        GetPlans:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /shopping-plans
+            Method: GET
+
+        CreatePlan:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /shopping-plans
+            Method: POST
+
+        GetPlan:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /shopping-plans/{id}
+            Method: GET
+
+        UpdatePlan:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /shopping-plans/{id}
+            Method: PATCH
+
+        # Items
+        GetItems:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /items
+            Method: GET
+
+        CreateItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /items
+            Method: POST
+
+        UpdateItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /items/{id}
+            Method: PATCH
+
+        DeleteItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /items/{id}
+            Method: DELETE
+
+        # Purchase
+        PurchaseItem:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /items/{id}/purchase
+            Method: POST
+
+        # Legacy bought route — kept for backward compat
+        MarkBought:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /items/{id}/bought
+            Method: PATCH
+
+        # AI
+        ParseItems:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /ai/parse
+            Method: POST
+
+        # History
+        GetHistory:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /history
+            Method: GET
+
+        # Suggestions
+        GetSuggestions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /suggestions
+            Method: GET
+
+        # Activity
+        GetActivity:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FamilyCartApi
+            Path: /activity
+            Method: GET
+
+  # ── DynamoDB tables ───────────────────────────────────────────────────────────
+
+  FamilyCartItemsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: FamilyCartItems
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: shoppingPlanId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: byPlan
+          KeySchema:
+            - AttributeName: shoppingPlanId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  FamilyCartPlansTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: FamilyCartPlans
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: familyId
+          AttributeType: S
+        - AttributeName: shoppingDate
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: byFamily
+          KeySchema:
+            - AttributeName: familyId
+              KeyType: HASH
+            - AttributeName: shoppingDate
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  FamilyCartHistoryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: FamilyCartHistory
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: familyId
+          AttributeType: S
+        - AttributeName: purchasedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: byFamily
+          KeySchema:
+            - AttributeName: familyId
+              KeyType: HASH
+            - AttributeName: purchasedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  FamilyCartActivityTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    Properties:
+      TableName: FamilyCartActivity
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+Outputs:
+
+  FamilyCartApiUrl:
+    Description: FamilyCart API endpoint
+    Value: !Sub 'https://${FamilyCartApi}.execute-api.${AWS::Region}.amazonaws.com'
+
+  FamilyCartFunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt FamilyCartFunction.Arn
+
+  FamilyCartItemsTableName:
+    Description: Items DynamoDB table
+    Value: !Ref FamilyCartItemsTable
+
+  FamilyCartPlansTableName:
+    Description: Plans DynamoDB table
+    Value: !Ref FamilyCartPlansTable
+
+  FamilyCartHistoryTableName:
+    Description: History DynamoDB table
+    Value: !Ref FamilyCartHistoryTable
