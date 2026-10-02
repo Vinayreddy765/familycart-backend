@@ -1,4 +1,4 @@
-# FamilyCart — Backend
+# FamilyCart - Backend
 
 FamilyCart is a shared household shopping memory that helps families decide what to buy, how much they need, who is shopping, and what was purchased previously.
 
